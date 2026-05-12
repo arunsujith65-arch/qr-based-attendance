@@ -1,0 +1,8 @@
+{
+  "name": "QR-Based Attendance",
+  "description": "An attendance system with QR code functionality.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}

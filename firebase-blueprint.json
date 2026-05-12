@@ -1,0 +1,117 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System users (Staff or Student)",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["staff", "student"] },
+        "department": { "type": "string" },
+        "studentId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "email", "role"]
+    },
+    "Class": {
+      "title": "Class",
+      "description": "A college course or subject",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "staffId": { "type": "string" },
+        "department": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "code", "staffId"]
+    },
+    "Session": {
+      "title": "Session",
+      "description": "An attendance session for a class",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "classId": { "type": "string" },
+        "staffId": { "type": "string" },
+        "qrCodeData": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "ended"] },
+        "startTime": { "type": "string", "format": "date-time" },
+        "expiryTime": { "type": "string", "format": "date-time" },
+        "endTime": { "type": "string", "format": "date-time" }
+      },
+      "required": ["classId", "staffId", "qrCodeData", "status", "startTime", "expiryTime"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "A student attendance record for a session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "studentName": { "type": "string" },
+        "studentEmail": { "type": "string" }
+      },
+      "required": ["sessionId", "studentId", "timestamp"]
+    },
+    "StudentAccount": {
+      "title": "Student Account",
+      "description": "Manual student credentials managed by staff",
+      "type": "object",
+      "properties": {
+        "registerNo": { "type": "string" },
+        "password": { "type": "string" },
+        "name": { "type": "string" },
+        "staffId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["registerNo", "password", "name", "staffId"]
+    },
+    "StudentPercentage": {
+      "title": "Student Percentage Record",
+      "description": "Stored attendance percentage calculation",
+      "type": "object",
+      "properties": {
+        "registerNo": { "type": "string" },
+        "name": { "type": "string" },
+        "percentage": { "type": "number" },
+        "totalSessions": { "type": "number" },
+        "presentCount": { "type": "number" },
+        "staffId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["registerNo", "name", "percentage", "staffId", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles (mostly staff via Google)"
+    },
+    "/classes/{classId}": {
+      "schema": "Class",
+      "description": "College classes"
+    },
+    "/sessions/{sessionId}": {
+      "schema": "Session",
+      "description": "Active and past attendance sessions"
+    },
+    "/attendance/{recordId}": {
+      "schema": "Attendance",
+      "description": "Attendance records"
+    },
+    "/students/{studentId}": {
+      "schema": "StudentAccount",
+      "description": "Student credentials created by staff"
+    },
+    "/studentPercentages/{id}": {
+      "schema": "StudentPercentage",
+      "description": "Stored attendance percentage reports"
+    }
+  }
+}
