@@ -285,8 +285,9 @@ export default function StaffDashboard() {
           updatedAt: serverTimestamp(),
         });
       } else {
-        // Use registerNo as document ID
-        await setDoc(doc(db, 'students', newRegNo), {
+        // Scope student ID by staffId to allow multiple staff to have same register numbers
+        const scopedId = `${profile.uid}_${newRegNo}`;
+        await setDoc(doc(db, 'students', scopedId), {
           registerNo: newRegNo,
           password: newStudentPass,
           name: newStudentName,
@@ -415,6 +416,7 @@ export default function StaffDashboard() {
       await addDoc(collection(db, 'attendance'), {
         sessionId: selectedHistorySession.id,
         classId: selectedHistorySession.classId,
+        staffId: profile.uid,
         studentId: student.registerNo,
         studentName: student.name,
         studentEmail: `${student.registerNo}@manual.local`,

@@ -60,19 +60,25 @@ export default function Login() {
       const userCredential = await signInAnonymously(auth);
       const authUid = userCredential.user.uid;
 
-      // 2. Verify credentials in 'students' collection (ID is registerNo)
-      const studentDocRef = doc(db, 'students', regNo);
-      const studentDocSnap = await getDoc(studentDocRef);
-
-      if (!studentDocSnap.exists() || studentDocSnap.data().password !== password) {
+      // 2. Verify credentials in 'students' collection via query
+      const studentsQuery = query(
+        collection(db, 'students'),
+        where('registerNo', '==', regNo),
+        where('password', '==', password)
+      );
+      const studentSnap = await getDocs(studentsQuery);
+      
+      if (studentSnap.empty) {
         await auth.signOut();
         throw new Error('Invalid Register Number or Password');
       }
 
-      const studentData = studentDocSnap.data();
+      const studentDoc = studentSnap.docs[0];
+      const studentData = studentDoc.data();
+      const studentId = studentDoc.id; // This is the scoped ID
       
       // 3. Update the student record with the current anonymous UID so we can verify them in rules
-      await updateDoc(studentDocRef, {
+      await updateDoc(doc(db, 'students', studentId), {
         lastLoggedInUid: authUid,
         lastLoginAt: serverTimestamp()
       });

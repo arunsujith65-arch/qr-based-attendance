@@ -40,12 +40,14 @@ service cloud.firestore {
     // --- Student Credentials (Managed by Staff) ---
     match /students/{studentId} {
       // Allow any signed in user to query/get students to verify login
-      allow read: if isSignedIn(); 
+      // Students use anonymous auth to perform this check
+      allow list: if isSignedIn(); 
+      allow get: if isSignedIn(); 
       
-      // Allow updating last login info if the user knows the registerNo and password (verified via query in app)
-      allow update: if isStaff() || (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastLoggedInUid', 'lastLoginAt']));
+      // Allow updating last login info if the user knows the registerNo and password
+      allow update: if (isStaff() && resource.data.staffId == request.auth.uid) || (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastLoggedInUid', 'lastLoginAt']));
       
-      allow create, delete: if isStaff();
+      allow create, delete: if isStaff() && request.resource.data.staffId == request.auth.uid;
     }
 
     // --- Users ---
@@ -55,7 +57,7 @@ service cloud.firestore {
       allow create: if isOwner(userId)
         && (
           (request.resource.data.role == 'staff' && request.resource.data.keys().hasAll(['uid', 'name', 'role'])) ||
-          (request.resource.data.role == 'student' && request.resource.data.keys().hasAll(['uid', 'name', 'role', 'studentId']) && get(/databases/$(database)/documents/students/$(request.resource.data.studentId)).data.lastLoggedInUid == request.auth.uid)
+          (request.resource.data.role == 'student' && request.resource.data.keys().hasAll(['uid', 'name', 'role', 'studentId']) && exists(/databases/$(database)/documents/students/$(request.resource.data.studentId)))
         )
         && request.resource.data.uid == request.auth.uid;
       allow update: if isOwner(userId)
@@ -66,7 +68,10 @@ service cloud.firestore {
     // --- Classes ---
     match /classes/{classId} {
       allow get: if isSignedIn();
-      allow list: if isSignedIn();
+      allow list: if isSignedIn() && (
+        isStaff() && resource.data.staffId == request.auth.uid ||
+        isStudent() && exists(/databases/$(database)/documents/students/$(getUserData(request.auth.uid).studentId))
+      );
       allow create: if isStaff()
         && request.resource.data.keys().hasAll(['name', 'code', 'staffId'])
         && request.resource.data.staffId == request.auth.uid;
@@ -77,7 +82,10 @@ service cloud.firestore {
     // --- Sessions ---
     match /sessions/{sessionId} {
       allow get: if isSignedIn();
-      allow list: if isSignedIn();
+      allow list: if isSignedIn() && (
+        isStaff() && resource.data.staffId == request.auth.uid ||
+        isStudent() && exists(/databases/$(database)/documents/students/$(getUserData(request.auth.uid).studentId))
+      );
       allow create: if isStaff()
         && request.resource.data.keys().hasAll(['classId', 'staffId', 'qrCodeData', 'status', 'startTime', 'expiryTime'])
         && request.resource.data.staffId == request.auth.uid;
@@ -89,18 +97,24 @@ service cloud.firestore {
     // --- Attendance ---
     match /attendance/{recordId} {
       // Students can only see their own attendance
-      // Staff can see all attendance
-      allow get: if isSignedIn() && (isStaff() || resource.data.studentId == getUserData(request.auth.uid).studentId);
-      allow list: if isSignedIn() && (isStaff() || (isStudent() && resource.data.studentId == getUserData(request.auth.uid).studentId));
+      // Staff can only see attendance for their own sessions
+      allow get: if isSignedIn() && (
+        (isStaff() && resource.data.staffId == request.auth.uid) || 
+        (isStudent() && resource.data.studentId == getUserData(request.auth.uid).studentId)
+      );
+      allow list: if isSignedIn() && (
+        (isStaff() && resource.data.staffId == request.auth.uid) || 
+        (isStudent() && resource.data.studentId == getUserData(request.auth.uid).studentId)
+      );
 
       allow create: if (isStudentVerified()
         && request.resource.data.studentId == getUserData(request.auth.uid).studentId
-        && getAfter(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status == 'active')
-        || isStaff();
+        && getAfter(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status == 'active'
+        && request.resource.data.staffId == getAfter(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.staffId)
+        || (isStaff() && request.resource.data.staffId == request.auth.uid);
       
-      // Attendance records are generally immutable once created (for students)
-      allow update: if isStaff();
-      allow delete: if isStaff();
+      allow update: if isStaff() && resource.data.staffId == request.auth.uid;
+      allow delete: if isStaff() && resource.data.staffId == request.auth.uid;
     }
     // --- Student Percentages ---
     match /studentPercentages/{id} {

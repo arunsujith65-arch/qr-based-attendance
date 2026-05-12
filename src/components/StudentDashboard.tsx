@@ -167,6 +167,7 @@ export default function StudentDashboard() {
       await addDoc(collection(db, 'attendance'), {
         sessionId: qrData.sessionId,
         classId: qrData.classId,
+        staffId: profile.staffId,
         studentId: profile.studentId,
         uid: profile.uid,
         studentName: profile.name,
