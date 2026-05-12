@@ -48,7 +48,8 @@ export default function StudentDashboard() {
 
     const attendanceQ = query(
       collection(db, 'attendance'),
-      where('studentId', '==', profile.studentId)
+      where('studentId', '==', profile.studentId),
+      where('staffId', '==', profile.staffId)
     );
 
     const classesQ = query(

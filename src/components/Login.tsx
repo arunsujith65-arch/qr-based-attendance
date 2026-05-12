@@ -41,10 +41,14 @@ export default function Login() {
         setProfile(newProfile);
       }
     } catch (err: any) {
-      try {
-        handleFirestoreError(err, OperationType.WRITE, 'users');
-      } catch (fErr: any) {
-        setError(fErr.message || 'Failed to login');
+      if (err.code === 'auth/unauthorized-domain') {
+        setError('Unauthorized Domain: Please add this domain to authorized domains in Firebase Console (Authentication > Settings > Authorized domains).');
+      } else {
+        try {
+          handleFirestoreError(err, OperationType.WRITE, 'users');
+        } catch (fErr: any) {
+          setError(fErr.message || 'Failed to login');
+        }
       }
     } finally {
       setLoading(false);
