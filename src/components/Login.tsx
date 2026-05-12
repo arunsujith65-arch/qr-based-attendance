@@ -42,7 +42,8 @@ export default function Login() {
       }
     } catch (err: any) {
       if (err.code === 'auth/unauthorized-domain') {
-        setError('Unauthorized Domain: Please add this domain to authorized domains in Firebase Console (Authentication > Settings > Authorized domains).');
+        const currentHost = window.location.hostname;
+        setError(`Unauthorized Domain: Please add "${currentHost}" to authorized domains in Firebase Console (Authentication > Settings > Authorized domains).`);
       } else {
         try {
           handleFirestoreError(err, OperationType.WRITE, 'users');
