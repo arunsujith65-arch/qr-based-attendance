@@ -111,6 +111,18 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["registerNo", "name", "percentage", "staffId", "createdAt"]
+    },
+    "AdminAccount": {
+      "title": "Admin Account",
+      "description": "Admin credentials for full system access",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "password": { "type": "string" },
+        "schoolName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "password", "schoolName"]
     }
   },
   "firestore": {
@@ -141,6 +153,10 @@
     "/studentPercentages/{id}": {
       "schema": "StudentPercentage",
       "description": "Stored attendance percentage reports"
+    },
+    "/admin_accounts/{adminId}": {
+      "schema": "AdminAccount",
+      "description": "Restricted admin profiles"
     }
   }
 }

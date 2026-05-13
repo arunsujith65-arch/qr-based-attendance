@@ -132,6 +132,7 @@ service cloud.firestore {
         (isStudent() && resource.data.studentId == getUserData(request.auth.uid).studentId)
       );
       allow list: if isSignedIn() && (
+        isAdmin() ||
         (isStaff() && resource.data.staffId == getUserData(request.auth.uid).staffId) || 
         (isStudent() && resource.data.studentId == getUserData(request.auth.uid).studentId && resource.data.staffId == getUserData(request.auth.uid).staffId)
       );
@@ -164,6 +165,12 @@ service cloud.firestore {
         && request.resource.data.staffId == getUserData(request.auth.uid).staffId
         && request.resource.data.instanceId == getUserData(request.auth.uid).instanceId;
       allow delete: if isStaff() && resource.data.staffId == getUserData(request.auth.uid).staffId;
+    }
+
+    // --- Admin Accounts Management ---
+    match /admin_accounts/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
     }
   }
 }
