@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from './AuthContext';
 import Login from './components/Login';
 import StaffDashboard from './components/StaffDashboard';
 import StudentDashboard from './components/StudentDashboard';
+import AdminDashboard from './components/AdminDashboard';
 import { Loader2 } from 'lucide-react';
 
 function AppContent() {
@@ -30,7 +31,9 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {profile.role === 'staff' ? (
+      {profile.role === 'admin' ? (
+        <AdminDashboard />
+      ) : profile.role === 'staff' ? (
         <StaffDashboard />
       ) : (
         <StudentDashboard />

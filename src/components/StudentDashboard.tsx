@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, where, onSnapshot, addDoc, serverTimestamp, getDocs, orderBy, limit, doc, getDoc } from 'firebase/firestore';
 import { useAuth } from '../AuthContext';
-import { Camera, LogOut, History, CheckCircle2, XCircle, Loader2, User, BookOpen } from 'lucide-react';
+import { Camera, LogOut, History, CheckCircle2, XCircle, Loader2, User, BookOpen, Clock, QrCode } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { motion, AnimatePresence } from 'motion/react';
-import { format } from 'date-fns';
+import { format, differenceInSeconds } from 'date-fns';
+import { QRCodeSVG } from 'qrcode.react';
 import { signOut } from 'firebase/auth';
 
 interface AttendanceRecord {
@@ -13,6 +14,7 @@ interface AttendanceRecord {
   sessionId: string;
   timestamp: any;
   studentId: string;
+  status: 'present' | 'absent';
 }
 
 interface ActivityItem {
@@ -27,20 +29,88 @@ interface ActivityItem {
   studentId: string;
 }
 
+interface ActiveSession extends ActivityItem {
+  qrCodeData: string;
+  status: 'active' | 'ended';
+  startTime: any;
+  expiryTime: any;
+}
+
 export default function StudentDashboard() {
   const { profile } = useAuth();
   const [history, setHistory] = useState<ActivityItem[]>([]);
+  const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
+  const [timeLeft, setTimeLeft] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isMarking, setIsMarking] = useState(false);
 
   useEffect(() => {
-    if (!profile || !profile.staffId || !profile.studentId) return;
+    if (!profile || profile.role !== 'student' || !profile.staffId) return;
 
-    // 1. Fetch sessions for this staff
+    // Listen for active session for this student's staff
+    const q = query(
+      collection(db, 'sessions'),
+      where('staffId', '==', profile.staffId),
+      where('status', '==', 'active')
+    );
+
+    const unsubscribe = onSnapshot(q, async (snap) => {
+      if (!snap.empty) {
+        const sessionData = snap.docs[0].data();
+        const session: any = { id: snap.docs[0].id, ...sessionData };
+        
+        // Fetch class name
+        const classRef = doc(db, 'classes', sessionData.classId);
+        const classSnap = await getDoc(classRef);
+        if (classSnap.exists()) {
+          session.className = classSnap.data().name;
+          session.classCode = classSnap.data().code;
+        }
+
+        setActiveSession(session as ActiveSession);
+      } else {
+        setActiveSession(null);
+      }
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'sessions'));
+
+    return () => unsubscribe();
+  }, [profile]);
+
+  useEffect(() => {
+    if (!activeSession) return;
+
+    const updateTimer = () => {
+      if (activeSession.expiryTime) {
+        const now = new Date();
+        const expiry = activeSession.expiryTime.toDate();
+        const diff = differenceInSeconds(expiry, now);
+
+        if (diff <= 0) {
+          setTimeLeft('Expired');
+          setActiveSession(null);
+        } else {
+          const mins = Math.floor(diff / 60);
+          const secs = diff % 60;
+          setTimeLeft(`${mins}:${secs < 10 ? '0' : ''}${secs}`);
+        }
+      }
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [activeSession]);
+
+  useEffect(() => {
+    if (!profile || profile.role !== 'student' || !profile.staffId || !profile.studentId) return;
+
+    // 1. Fetch sessions for this staff since student was created
     const sessionsQ = query(
       collection(db, 'sessions'),
       where('staffId', '==', profile.staffId),
+      where('startTime', '>=', profile.createdAt || new Date(0)),
       where('status', '==', 'ended'),
       orderBy('startTime', 'desc'),
       limit(30)
@@ -49,7 +119,8 @@ export default function StudentDashboard() {
     const attendanceQ = query(
       collection(db, 'attendance'),
       where('studentId', '==', profile.studentId),
-      where('staffId', '==', profile.staffId)
+      where('staffId', '==', profile.staffId),
+      where('instanceId', '==', profile.instanceId || 'legacy')
     );
 
     const classesQ = query(
@@ -66,7 +137,7 @@ export default function StudentDashboard() {
       const attendanceMap = new Map(attendance.map(a => [a.sessionId, a]));
 
       const mergedHistory: ActivityItem[] = sessions.map(session => {
-        const attendanceData = attendanceMap.get(session.id);
+        const attendanceData = attendanceMap.get(session.id) as any;
         const cls = classesMap.get(session.classId);
         
         return {
@@ -76,7 +147,7 @@ export default function StudentDashboard() {
           className: cls?.name || 'Unknown Class',
           classCode: cls?.code || 'N/A',
           timestamp: attendanceData?.timestamp || session.startTime,
-          isPresent: !!attendanceData,
+          isPresent: attendanceData?.status === 'present',
           studentName: profile.name,
           studentId: profile.studentId || ''
         };
@@ -89,17 +160,17 @@ export default function StudentDashboard() {
     const unsubscribeSessions = onSnapshot(sessionsQ, (snap) => {
       sessions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       updateHistory();
-    }, (err) => console.error("Sessions listener error:", err));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'sessions'));
 
     const unsubscribeAttendance = onSnapshot(attendanceQ, (snap) => {
       attendance = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       updateHistory();
-    }, (err) => console.error("Attendance listener error:", err));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'attendance'));
 
     const unsubscribeClasses = onSnapshot(classesQ, (snap) => {
       classes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       updateHistory();
-    }, (err) => console.error("Classes listener error:", err));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'classes'));
 
     return () => {
       unsubscribeSessions();
@@ -127,12 +198,18 @@ export default function StudentDashboard() {
     setIsScanning(false);
     try {
       const qrData = JSON.parse(decodedText);
-      if (!qrData.sessionId || !profile) {
-        throw new Error("Invalid QR Code");
-      }
+      await processAttendance(qrData.sessionId, qrData.classId);
+    } catch (err) {
+      setScanResult({ success: false, message: "Invalid QR Code format" });
+    }
+  };
 
+  const processAttendance = async (sessionId: string, classId: string) => {
+    if (isMarking) return;
+    setIsMarking(true);
+    try {
       // 1. Check if session is active and not expired
-      const sessionRef = doc(db, 'sessions', qrData.sessionId);
+      const sessionRef = doc(db, 'sessions', sessionId);
       const sessionSnap = await getDoc(sessionRef);
 
       if (!sessionSnap.exists()) {
@@ -152,9 +229,13 @@ export default function StudentDashboard() {
       }
 
       // 2. Check if already marked
+      if (!profile?.studentId) {
+        throw new Error("Student ID not found in profile");
+      }
+
       const q = query(
         collection(db, 'attendance'),
-        where('sessionId', '==', qrData.sessionId),
+        where('sessionId', '==', sessionId),
         where('studentId', '==', profile.studentId)
       );
       const existing = await getDocs(q);
@@ -165,12 +246,18 @@ export default function StudentDashboard() {
       }
 
       // 3. Mark attendance
+      if (!profile.staffId) {
+        throw new Error("Missing staffId in profile");
+      }
+
       await addDoc(collection(db, 'attendance'), {
-        sessionId: qrData.sessionId,
-        classId: qrData.classId,
+        sessionId: sessionId,
+        classId: classId,
         staffId: profile.staffId,
         studentId: profile.studentId,
+        instanceId: profile.instanceId || 'legacy',
         uid: profile.uid,
+        status: 'present',
         studentName: profile.name,
         studentEmail: profile.email,
         timestamp: serverTimestamp(),
@@ -179,7 +266,6 @@ export default function StudentDashboard() {
       setScanResult({ success: true, message: "Attendance marked successfully!" });
     } catch (err: any) {
       if (err.message && err.message.includes('{')) {
-         // Already JSON from handleFirestoreError
          setScanResult({ success: false, message: "Security error: Please try again" });
       } else {
         try {
@@ -188,6 +274,8 @@ export default function StudentDashboard() {
            setScanResult({ success: false, message: fErr.message || "Failed to process attendance" });
         }
       }
+    } finally {
+      setIsMarking(false);
     }
   };
 
@@ -218,20 +306,84 @@ export default function StudentDashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Left Column: Action */}
         <div className="space-y-6">
-          <motion.button
-            whileTap={{ scale: 0.98 }}
-            onClick={() => setIsScanning(true)}
-            className="w-full bg-indigo-600 text-white p-8 rounded-3xl shadow-xl shadow-indigo-200 flex flex-col items-center gap-4 group relative overflow-hidden"
-          >
-            <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-            <div className="p-4 bg-white/20 rounded-2xl backdrop-blur-sm">
-               <Camera size={48} />
-            </div>
-            <div className="text-center">
-              <h2 className="text-2xl font-bold">Mark Attendance</h2>
-              <p className="text-sm opacity-80 font-medium">Scan session QR code</p>
-            </div>
-          </motion.button>
+          <AnimatePresence mode="wait">
+            {activeSession ? (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-white rounded-3xl shadow-xl border-2 border-indigo-100 overflow-hidden relative group"
+              >
+                <div className="bg-indigo-600 p-6 text-white">
+                  <div className="flex justify-between items-center mb-4">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Active Session</p>
+                      <h2 className="text-xl font-bold">{activeSession.className}</h2>
+                      <p className="text-xs opacity-70 font-mono">{activeSession.classCode}</p>
+                    </div>
+                    <div className="bg-white/20 p-3 rounded-2xl backdrop-blur-md">
+                       <Clock className="text-white" size={24} />
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center justify-between bg-white/10 rounded-2xl p-4 border border-white/5">
+                    <div className="text-center flex-1">
+                      <p className="text-[10px] font-bold uppercase opacity-60">Time Remaining</p>
+                      <p className="text-3xl font-black font-mono tracking-tighter">{timeLeft}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-8 flex flex-col items-center">
+                   <div className="bg-white p-4 rounded-3xl shadow-inner border border-gray-100 mb-6 group-hover:scale-105 transition-transform">
+                      <QRCodeSVG 
+                        value={activeSession.qrCodeData} 
+                        size={160}
+                        level="H"
+                      />
+                   </div>
+                   
+                   <button
+                    disabled={isMarking}
+                    onClick={() => processAttendance(activeSession.id, activeSession.classId)}
+                    className="w-full py-4 bg-indigo-600 text-white font-bold rounded-2xl hover:bg-indigo-700 shadow-lg shadow-indigo-100 transition flex items-center justify-center gap-2 group/btn disabled:opacity-50"
+                   >
+                     {isMarking ? (
+                       <Loader2 className="animate-spin" />
+                     ) : (
+                       <>
+                         <CheckCircle2 size={20} className="group-hover/btn:scale-110 transition-transform" />
+                         Mark Arrival Directly
+                       </>
+                     )}
+                   </button>
+                   <p className="text-[10px] text-gray-400 mt-4 text-center font-medium">
+                     You can mark attendance directly because you are logged in.
+                   </p>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.button
+                key="no-session"
+                whileTap={{ scale: 0.98 }}
+                onClick={() => setIsScanning(true)}
+                className="w-full bg-indigo-600 text-white p-12 rounded-[40px] shadow-2xl shadow-indigo-200 flex flex-col items-center gap-6 group relative overflow-hidden h-[360px] justify-center"
+              >
+                <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="p-6 bg-white/20 rounded-3xl backdrop-blur-sm">
+                   <Camera size={64} />
+                </div>
+                <div className="text-center">
+                  <h2 className="text-3xl font-black tracking-tight">Mark Arrival</h2>
+                  <p className="text-sm opacity-80 font-bold uppercase tracking-widest mt-2">Scan Session QR</p>
+                </div>
+                <div className="absolute bottom-6 left-6 right-6 p-4 bg-black/10 rounded-2xl flex items-center justify-between text-[10px] font-bold">
+                   <span>CAMERA SCANNER</span>
+                   <QrCode size={16} />
+                </div>
+              </motion.button>
+            )}
+          </AnimatePresence>
 
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex items-center justify-between">
             <div className="flex items-center gap-3">

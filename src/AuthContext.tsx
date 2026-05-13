@@ -1,9 +1,9 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User as FirebaseUser, onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { auth, db, handleFirestoreError, OperationType } from './firebase';
 
-export type UserRole = 'staff' | 'student';
+export type UserRole = 'admin' | 'staff' | 'student';
 
 export interface UserProfile {
   uid: string;
@@ -13,6 +13,7 @@ export interface UserProfile {
   department?: string;
   studentId?: string;
   staffId?: string;
+  instanceId?: string;
   createdAt?: any;
   isManual?: boolean;
 }
@@ -70,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
           setLoading(false);
         }, (error) => {
-          console.error("Error fetching user profile snapshot:", error);
+          handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
           setLoading(false);
         });
       } else {

@@ -8,12 +8,27 @@
         "uid": { "type": "string" },
         "name": { "type": "string" },
         "email": { "type": "string" },
-        "role": { "type": "string", "enum": ["staff", "student"] },
+        "role": { "type": "string", "enum": ["admin", "staff", "student"] },
         "department": { "type": "string" },
         "studentId": { "type": "string" },
+        "staffId": { "type": "string" },
+        "instanceId": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "name", "email", "role"]
+    },
+    "StaffRegistration": {
+      "title": "Staff Registration",
+      "description": "Staff profiles managed by Admin",
+      "type": "object",
+      "properties": {
+        "staffId": { "type": "string" },
+        "name": { "type": "string" },
+        "password": { "type": "string" },
+        "instanceId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["staffId", "name", "password"]
     },
     "Class": {
       "title": "Class",
@@ -24,6 +39,7 @@
         "name": { "type": "string" },
         "code": { "type": "string" },
         "staffId": { "type": "string" },
+        "instanceId": { "type": "string" },
         "department": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
@@ -37,6 +53,7 @@
         "id": { "type": "string" },
         "classId": { "type": "string" },
         "staffId": { "type": "string" },
+        "instanceId": { "type": "string" },
         "qrCodeData": { "type": "string" },
         "status": { "type": "string", "enum": ["active", "ended"] },
         "startTime": { "type": "string", "format": "date-time" },
@@ -52,25 +69,32 @@
       "properties": {
         "id": { "type": "string" },
         "sessionId": { "type": "string" },
+        "classId": { "type": "string" },
+        "staffId": { "type": "string" },
+        "instanceId": { "type": "string" },
         "studentId": { "type": "string" },
+        "uid": { "type": "string" },
         "timestamp": { "type": "string", "format": "date-time" },
         "studentName": { "type": "string" },
-        "studentEmail": { "type": "string" }
+        "studentEmail": { "type": "string" },
+        "status": { "type": "string", "enum": ["present", "absent"] },
+        "manuallyMarkedBy": { "type": "string" }
       },
-      "required": ["sessionId", "studentId", "timestamp"]
+      "required": ["sessionId", "classId", "studentId", "timestamp", "uid", "status"]
     },
     "StudentAccount": {
       "title": "Student Account",
-      "description": "Manual student credentials managed by staff",
+      "description": "Authorized student records managed by staff",
       "type": "object",
       "properties": {
         "registerNo": { "type": "string" },
-        "password": { "type": "string" },
         "name": { "type": "string" },
+        "password": { "type": "string" },
         "staffId": { "type": "string" },
+        "instanceId": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["registerNo", "password", "name", "staffId"]
+      "required": ["registerNo", "name", "password", "staffId"]
     },
     "StudentPercentage": {
       "title": "Student Percentage Record",
@@ -83,6 +107,7 @@
         "totalSessions": { "type": "number" },
         "presentCount": { "type": "number" },
         "staffId": { "type": "string" },
+        "instanceId": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["registerNo", "name", "percentage", "staffId", "createdAt"]
@@ -91,7 +116,11 @@
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
-      "description": "User profiles (mostly staff via Google)"
+      "description": "User profiles (Staff, Student or Admin)"
+    },
+    "/staff_registrations/{id}": {
+      "schema": "StaffRegistration",
+      "description": "Staff login credentials managed by Admin"
     },
     "/classes/{classId}": {
       "schema": "Class",

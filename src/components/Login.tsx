@@ -3,21 +3,21 @@ import { GoogleAuthProvider, signInWithPopup, signInAnonymously } from 'firebase
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth, UserRole, UserProfile } from '../AuthContext';
-import { LogIn, LogOut, GraduationCap, School, KeyRound, User as UserIcon, Loader2, Eye, EyeOff } from 'lucide-react';
+import { LogIn, LogOut, GraduationCap, School, KeyRound, User as UserIcon, Loader2, Plus, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function Login() {
   const { user, profile, setProfile, logout } = useAuth();
-  const [view, setView] = useState<'selection' | 'staff' | 'student'>('selection');
+  const [view, setView] = useState<'selection' | 'admin' | 'staff' | 'student'>('selection');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Student Form State
-  const [regNo, setRegNo] = useState('');
+  // Form State
+  const [userId, setUserId] = useState(''); // Used for student/staff ID
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  const handleStaffLogin = async () => {
+  const handleGoogleLogin = async (role: UserRole) => {
     setLoading(true);
     setError(null);
     try {
@@ -28,13 +28,20 @@ export default function Login() {
       const docSnap = await getDoc(docRef);
 
       if (docSnap.exists()) {
-        setProfile(docSnap.data() as UserProfile);
+        const data = docSnap.data() as UserProfile;
+        // If user already has a profile, just set it and we're done
+        setProfile(data);
       } else {
+        // New User logic
+        // Any Google login via Admin path gets Admin role (as per user's "Any Gmail account can login" for admin)
+        if (role !== 'admin') {
+          throw new Error('Only Admin accounts can login with Google');
+        }
         const newProfile: UserProfile = {
           uid: result.user.uid,
-          name: result.user.displayName || 'Staff User',
+          name: result.user.displayName || 'Admin User',
           email: result.user.email || '',
-          role: 'staff',
+          role: 'admin',
           createdAt: serverTimestamp() as any,
         };
         await setDoc(docRef, newProfile);
@@ -45,18 +52,14 @@ export default function Login() {
         const currentHost = window.location.hostname;
         setError(`Unauthorized Domain: Please add "${currentHost}" to authorized domains in Firebase Console (Authentication > Settings > Authorized domains).`);
       } else {
-        try {
-          handleFirestoreError(err, OperationType.WRITE, 'users');
-        } catch (fErr: any) {
-          setError(fErr.message || 'Failed to login');
-        }
+        setError(err.message || 'Failed to login');
       }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleStudentLogin = async (e: React.FormEvent) => {
+  const handleManualLogin = async (e: React.FormEvent, role: 'staff' | 'student') => {
     e.preventDefault();
     setLoading(true);
     setError(null);
@@ -65,46 +68,47 @@ export default function Login() {
       const userCredential = await signInAnonymously(auth);
       const authUid = userCredential.user.uid;
 
-      // 2. Verify credentials in 'students' collection via query
-      const studentsQuery = query(
-        collection(db, 'students'),
-        where('registerNo', '==', regNo),
-        where('password', '==', password)
+      const collectionName = role === 'staff' ? 'staff_registrations' : 'students';
+      const idField = role === 'staff' ? 'staffId' : 'registerNo';
+
+      // 2. Verify credentials via query
+      const q = query(
+        collection(db, collectionName),
+        where(idField, '==', userId.trim()),
+        where('password', '==', password.trim())
       );
-      const studentSnap = await getDocs(studentsQuery);
+      const snap = await getDocs(q);
       
-      if (studentSnap.empty) {
+      if (snap.empty) {
         await auth.signOut();
-        throw new Error('Invalid Register Number or Password');
+        throw new Error(`Invalid ${role === 'staff' ? 'Staff ID' : 'Register Number'} or Password`);
       }
 
-      const studentDoc = studentSnap.docs[0];
-      const studentData = studentDoc.data();
-      const studentId = studentDoc.id; // This is the scoped ID
+      const credentialDoc = snap.docs[0];
+      const credentialData = credentialDoc.data();
+      const internalId = credentialDoc.id;
       
-      // 3. Update the student record with the current anonymous UID so we can verify them in rules
-      await updateDoc(doc(db, 'students', studentId), {
+      // 3. Update the record with the current anonymous UID
+      await updateDoc(doc(db, collectionName, internalId), {
         lastLoggedInUid: authUid,
         lastLoginAt: serverTimestamp()
       });
 
-      // 4. Create/Update user profile in 'users' collection to satisfy isStudent() helper
-      // AuthContext's onSnapshot will pick this up automatically
+      // 4. Create/Update user profile in 'users' collection
       const userProfileRef = doc(db, 'users', authUid);
       const userProfile: UserProfile = {
         uid: authUid,
-        name: studentData.name,
-        email: `${regNo}@manual.local`,
-        role: 'student',
-        studentId: regNo,
-        staffId: studentData.staffId,
+        name: credentialData.name,
+        email: role === 'staff' ? `${userId.trim()}@staff.local` : `${userId.trim()}@student.local`,
+        role: role,
+        studentId: role === 'student' ? userId.trim() : null,
+        staffId: (role === 'staff' ? userId.trim() : credentialData.staffId) || null,
+        instanceId: credentialData.instanceId || null,
         createdAt: serverTimestamp() as any,
       };
       
       await setDoc(userProfileRef, userProfile);
-      
-      // 5. Progress is now handled by AuthContext onSnapshot
-      // We can reset view but AuthContext will switch components
+      setProfile(userProfile);
       
     } catch (err: any) {
       setError(err.message || 'Login failed');
@@ -159,53 +163,66 @@ export default function Login() {
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
-              className="grid grid-cols-1 md:grid-cols-2 gap-4"
+              className="grid grid-cols-1 md:grid-cols-3 gap-4"
             >
               <button
                 onClick={() => setView('student')}
-                className="flex flex-col items-center p-8 bg-white border-2 border-gray-100 rounded-2xl hover:border-indigo-500 hover:shadow-lg transition-all group"
+                className="flex flex-col items-center p-6 bg-white border-2 border-gray-100 rounded-2xl hover:border-indigo-500 hover:shadow-lg transition-all group"
               >
                 <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl group-hover:bg-indigo-600 group-hover:text-white transition-colors mb-3">
-                  <GraduationCap className="w-8 h-8" />
+                  <GraduationCap className="w-6 h-6" />
                 </div>
-                <span className="font-bold text-gray-900">Student Login</span>
-                <span className="text-sm text-gray-500 mt-1">Login with Register No</span>
+                <span className="font-bold text-gray-900">Student</span>
+                <span className="text-xs text-gray-500 mt-1">Reg No</span>
               </button>
 
               <button
                 onClick={() => setView('staff')}
-                className="flex flex-col items-center p-8 bg-white border-2 border-gray-100 rounded-2xl hover:border-indigo-500 hover:shadow-lg transition-all group"
+                className="flex flex-col items-center p-6 bg-white border-2 border-gray-100 rounded-2xl hover:border-indigo-500 hover:shadow-lg transition-all group"
               >
                 <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl group-hover:bg-indigo-600 group-hover:text-white transition-colors mb-3">
-                  <School className="w-8 h-8" />
+                  <School className="w-6 h-6" />
                 </div>
-                <span className="font-bold text-gray-900">Staff Login</span>
-                <span className="text-sm text-gray-500 mt-1">Login with Google ID</span>
+                <span className="font-bold text-gray-900">Staff</span>
+                <span className="text-xs text-gray-500 mt-1">Staff ID</span>
+              </button>
+
+              <button
+                onClick={() => setView('admin')}
+                className="flex flex-col items-center p-6 bg-white border-2 border-gray-100 rounded-2xl hover:border-indigo-500 hover:shadow-lg transition-all group"
+              >
+                <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl group-hover:bg-indigo-600 group-hover:text-white transition-colors mb-3">
+                  <School className="w-6 h-6" />
+                </div>
+                <span className="font-bold text-gray-900">Admin</span>
+                <span className="text-xs text-gray-500 mt-1">Google Login</span>
               </button>
             </motion.div>
           )}
 
-          {view === 'student' && (
+          {(view === 'student' || view === 'staff') && (
             <motion.div
-              key="student"
+              key={view}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
               className="bg-white p-8 rounded-3xl shadow-xl border border-gray-100"
             >
-              <h2 className="text-2xl font-bold mb-6">Student Login</h2>
-              <form onSubmit={handleStudentLogin} className="space-y-4 text-left">
+              <h2 className="text-2xl font-bold mb-6 capitalize">{view} Login</h2>
+              <form onSubmit={(e) => handleManualLogin(e, view as 'staff' | 'student')} className="space-y-4 text-left">
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Register Number</label>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">
+                    {view === 'staff' ? 'Staff ID' : 'Register Number'}
+                  </label>
                   <div className="relative">
                     <UserIcon className="absolute left-3 top-3 text-gray-400" size={18} />
                     <input
                       required
                       type="text"
                       className="w-full pl-10 p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-                      placeholder="Enter register no"
-                      value={regNo}
-                      onChange={(e) => setRegNo(e.target.value)}
+                      placeholder={`Enter ${view === 'staff' ? 'staff id' : 'register no'}`}
+                      value={userId}
+                      onChange={(e) => setUserId(e.target.value)}
                     />
                   </div>
                 </div>
@@ -230,6 +247,7 @@ export default function Login() {
                     </button>
                   </div>
                 </div>
+                
                 <button
                   disabled={loading}
                   type="submit"
@@ -237,6 +255,7 @@ export default function Login() {
                 >
                   {loading ? <Loader2 className="animate-spin" /> : <LogIn size={18} />} Sign In
                 </button>
+
                 <button
                   type="button"
                   onClick={() => setView('selection')}
@@ -248,19 +267,19 @@ export default function Login() {
             </motion.div>
           )}
 
-          {view === 'staff' && (
+          {view === 'admin' && (
             <motion.div
-              key="staff"
+              key="admin"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
               className="bg-white p-8 rounded-3xl shadow-xl border border-gray-100"
             >
-              <h2 className="text-2xl font-bold mb-6">Staff Access</h2>
-              <p className="text-gray-500 mb-8">Please use your professional Google ID to securely access the staff dashboard and manage classes.</p>
+              <h2 className="text-2xl font-bold mb-6">Admin Access</h2>
+              <p className="text-gray-500 mb-8">Google Login for Administrators</p>
               <button
                 disabled={loading}
-                onClick={handleStaffLogin}
+                onClick={() => handleGoogleLogin('admin')}
                 className="w-full py-4 bg-gray-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-gray-800 shadow-lg transition disabled:opacity-50"
               >
                 {loading ? <Loader2 className="animate-spin" /> : <LogIn size={18} />} Continue with Google

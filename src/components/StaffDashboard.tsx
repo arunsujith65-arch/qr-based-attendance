@@ -30,12 +30,14 @@ interface Attendance {
   studentName: string;
   studentEmail: string;
   timestamp: any;
+  status: 'present' | 'absent';
+  studentId: string;
 }
 
 interface StudentAccount {
   id: string;
   registerNo: string;
-  password: string;
+  password?: string;
   name: string;
   lastLoggedInUid?: string;
 }
@@ -100,45 +102,52 @@ export default function StaffDashboard() {
   const [sessionDuration, setSessionDuration] = useState<number>(15); // minutes
 
   useEffect(() => {
-    if (!profile) return;
+    if (!profile || profile.role !== 'staff' || !profile.staffId) return;
 
     const q = query(
       collection(db, 'classes'),
-      where('staffId', '==', profile.uid)
+      where('staffId', '==', profile.staffId),
+      where('instanceId', '==', profile.instanceId || 'legacy')
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const classList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Class));
       setClasses(classList);
       setLoading(false);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'classes');
     });
 
     return () => unsubscribe();
   }, [profile]);
 
   useEffect(() => {
-    if (!profile || (activeTab !== 'students' && activeTab !== 'records')) return;
+    if (!profile || profile.role !== 'staff' || !profile.staffId || (activeTab !== 'students' && activeTab !== 'records')) return;
 
     const q = query(
       collection(db, 'students'),
-      where('staffId', '==', profile.uid),
+      where('staffId', '==', profile.staffId),
+      where('instanceId', '==', profile.instanceId || 'legacy'),
       orderBy('registerNo', 'asc')
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const studentList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StudentAccount));
       setStudents(studentList);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'students');
     });
 
     return () => unsubscribe();
   }, [profile, activeTab]);
 
   useEffect(() => {
-    if (!profile || activeTab !== 'records') return;
+    if (!profile || profile.role !== 'staff' || !profile.staffId || activeTab !== 'records') return;
 
     const q = query(
       collection(db, 'sessions'),
-      where('staffId', '==', profile.uid),
+      where('staffId', '==', profile.staffId),
+      where('instanceId', '==', profile.instanceId || 'legacy'),
       where('status', '==', 'ended'),
       orderBy('startTime', 'desc')
     );
@@ -155,6 +164,8 @@ export default function StaffDashboard() {
         } as SessionRecord;
       });
       setPastSessions(sessions);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'sessions');
     });
 
     return () => unsubscribe();
@@ -168,40 +179,47 @@ export default function StaffDashboard() {
 
     const q = query(
       collection(db, 'attendance'),
-      where('sessionId', '==', selectedHistorySession.id)
+      where('sessionId', '==', selectedHistorySession.id),
+      where('staffId', '==', profile.staffId)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const records = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance));
       setHistoryAttendance(records);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'attendance');
     });
 
     return () => unsubscribe();
   }, [selectedHistorySession]);
 
   useEffect(() => {
-    if (!profile || activeTab !== 'records') return;
+    if (!profile || profile.role !== 'staff' || !profile.staffId || activeTab !== 'records') return;
 
     const q = query(
       collection(db, 'studentPercentages'),
-      where('staffId', '==', profile.uid),
+      where('staffId', '==', profile.staffId),
+      where('instanceId', '==', profile.instanceId || 'legacy'),
       orderBy('createdAt', 'desc')
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StudentPercentage));
       setStoredPercentages(list);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'studentPercentages');
     });
 
     return () => unsubscribe();
   }, [profile, activeTab]);
 
   useEffect(() => {
-    if (!profile) return;
+    if (!profile || profile.role !== 'staff' || !profile.staffId) return;
 
     const q = query(
       collection(db, 'sessions'),
-      where('staffId', '==', profile.uid),
+      where('staffId', '==', profile.staffId),
+      where('instanceId', '==', profile.instanceId || 'legacy'),
       where('status', '==', 'active')
     );
 
@@ -212,6 +230,8 @@ export default function StaffDashboard() {
       } else {
         setActiveSession(null);
       }
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'sessions');
     });
 
     return () => unsubscribe();
@@ -226,12 +246,16 @@ export default function StaffDashboard() {
     const q = query(
       collection(db, 'attendance'),
       where('sessionId', '==', activeSession.id),
+      where('staffId', '==', profile.staffId),
+      where('instanceId', '==', profile.instanceId || 'legacy'),
       orderBy('timestamp', 'desc')
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const records = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance));
       setAttendance(records);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'attendance');
     });
 
     return () => unsubscribe();
@@ -260,7 +284,8 @@ export default function StaffDashboard() {
       await addDoc(collection(db, 'classes'), {
         name: newClassName,
         code: newClassCode,
-        staffId: profile.uid,
+        staffId: profile.staffId,
+        instanceId: profile.instanceId || 'legacy',
         createdAt: serverTimestamp(),
       });
       setNewClassName('');
@@ -277,27 +302,26 @@ export default function StaffDashboard() {
 
     try {
       if (editingStudent) {
-        // If regNo changed, we need to handle it. For simplicity, we disable regNo editing once created or delete and recreated.
-        // But for now, let's just update the existing document.
         await updateDoc(doc(db, 'students', editingStudent.id), {
-          password: newStudentPass,
           name: newStudentName,
+          password: newStudentPass,
           updatedAt: serverTimestamp(),
         });
       } else {
-        // Scope student ID by staffId to allow multiple staff to have same register numbers
-        const scopedId = `${profile.uid}_${newRegNo}`;
+        const scopedId = `${profile.staffId}_${newRegNo}`;
+        const instanceId = Math.random().toString(36).substring(2, 12);
         await setDoc(doc(db, 'students', scopedId), {
           registerNo: newRegNo,
-          password: newStudentPass,
+          instanceId,
           name: newStudentName,
-          staffId: profile.uid,
+          password: newStudentPass,
+          staffId: profile.staffId,
           createdAt: serverTimestamp(),
         });
       }
       setNewRegNo('');
-      setNewStudentPass('');
       setNewStudentName('');
+      setNewStudentPass('');
       setEditingStudent(null);
       setIsStudentModalOpen(false);
     } catch (err) {
@@ -309,13 +333,13 @@ export default function StaffDashboard() {
     if (student) {
       setEditingStudent(student);
       setNewRegNo(student.registerNo);
-      setNewStudentPass(student.password);
       setNewStudentName(student.name);
+      setNewStudentPass(student.password || '');
     } else {
       setEditingStudent(null);
       setNewRegNo('');
-      setNewStudentPass('');
       setNewStudentName('');
+      setNewStudentPass('');
     }
     setIsStudentModalOpen(true);
   };
@@ -329,18 +353,21 @@ export default function StaffDashboard() {
     
     const durationMs = sessionDuration * 60 * 1000;
     const expiryDate = new Date(Date.now() + durationMs);
+    const sessionRef = doc(collection(db, 'sessions'));
+    const sessionId = sessionRef.id;
 
     const qrData = JSON.stringify({
-       sessionId: Math.random().toString(36).substring(2, 15),
+       sessionId: sessionId,
        classId: selectedClassIdForSession,
        timestamp: Date.now(),
        expiry: expiryDate.getTime()
     });
 
     try {
-      await addDoc(collection(db, 'sessions'), {
+      await setDoc(sessionRef, {
         classId: selectedClassIdForSession,
-        staffId: profile.uid,
+        staffId: profile.staffId,
+        instanceId: profile.instanceId || 'legacy',
         qrCodeData: qrData,
         status: 'active',
         startTime: serverTimestamp(),
@@ -354,8 +381,39 @@ export default function StaffDashboard() {
   };
 
   const endSession = async () => {
-    if (!activeSession) return;
+    if (!activeSession || !profile) return;
     try {
+      // 1. Process Absences
+      // Fetch current attendance to see who is present
+      const attendanceQ = query(
+        collection(db, 'attendance'),
+        where('sessionId', '==', activeSession.id)
+      );
+      const attendanceSnap = await getDocs(attendanceQ);
+      const presentStudentIds = attendanceSnap.docs.map(doc => doc.data().studentId);
+
+      // Identify students who are NOT present
+      const absentStudents = students.filter(s => !presentStudentIds.includes(s.registerNo));
+
+      // Create absent records
+      const batchPromises = absentStudents.map(student => 
+        addDoc(collection(db, 'attendance'), {
+          sessionId: activeSession.id,
+          classId: activeSession.classId,
+          staffId: profile.staffId || 'unknown',
+          instanceId: profile.instanceId || 'legacy',
+          studentId: student.registerNo,
+          uid: student.lastLoggedInUid || `absent_${student.registerNo}`,
+          status: 'absent',
+          studentName: student.name,
+          studentEmail: `${student.registerNo}@absent.local`,
+          timestamp: serverTimestamp(),
+        })
+      );
+
+      await Promise.all(batchPromises);
+
+      // 2. End the session
       await updateDoc(doc(db, 'sessions', activeSession.id), {
         status: 'ended',
         endTime: serverTimestamp(),
@@ -416,8 +474,11 @@ export default function StaffDashboard() {
       await addDoc(collection(db, 'attendance'), {
         sessionId: selectedHistorySession.id,
         classId: selectedHistorySession.classId,
-        staffId: profile.uid,
+        staffId: profile.staffId,
+        instanceId: profile.instanceId || 'legacy',
         studentId: student.registerNo,
+        uid: student.lastLoggedInUid || `manual_${student.registerNo}`, // fallback uid
+        status: 'present',
         studentName: student.name,
         studentEmail: `${student.registerNo}@manual.local`,
         timestamp: serverTimestamp(),
@@ -441,7 +502,7 @@ export default function StaffDashboard() {
   };
 
   const calculatePercentage = async () => {
-    if (!profile || !calcRegNo) return;
+    if (!profile || !profile.staffId || !calcRegNo) return;
     setIsCalculating(true);
     setCalculatedResult(null);
 
@@ -449,7 +510,7 @@ export default function StaffDashboard() {
       // 1. Get all sessions ended by this staff
       const sessionsQ = query(
         collection(db, 'sessions'),
-        where('staffId', '==', profile.uid),
+        where('staffId', '==', profile.staffId),
         where('status', '==', 'ended')
       );
       const sessionsSnap = await getDocs(sessionsQ);
@@ -496,7 +557,8 @@ export default function StaffDashboard() {
         percentage: calculatedResult.percentage,
         totalSessions: calculatedResult.total,
         presentCount: calculatedResult.present,
-        staffId: profile.uid,
+        staffId: profile.staffId,
+        instanceId: profile.instanceId || 'legacy',
         createdAt: serverTimestamp(),
       });
       setIsPercentageModalOpen(false);
@@ -867,32 +929,35 @@ export default function StaffDashboard() {
                 <div className="p-6 bg-gray-900 text-white">
                    <h3 className="font-bold">Roll Call Details</h3>
                    <p className="text-xs text-gray-400 mt-1">{selectedHistorySession.className}</p>
-                   <div className="mt-4 flex gap-4">
-                      <div className="flex-1 bg-white/10 rounded-xl p-3 text-center border border-white/5">
-                         <p className="text-[10px] text-gray-400 uppercase font-bold">Present</p>
-                         <p className="text-xl font-bold">{historyAttendance.length}</p>
-                      </div>
-                      <div className="flex-1 bg-white/10 rounded-xl p-3 text-center border border-white/5">
-                         <p className="text-[10px] text-gray-400 uppercase font-bold">Absent</p>
-                         <p className="text-xl font-bold">{Math.max(0, students.length - historyAttendance.length)}</p>
-                      </div>
-                   </div>
+                    <div className="mt-4 flex gap-4">
+                       <div className="flex-1 bg-white/10 rounded-xl p-3 text-center border border-white/5">
+                          <p className="text-[10px] text-gray-400 uppercase font-bold">Present</p>
+                          <p className="text-xl font-bold">{historyAttendance.filter(a => a.status === 'present').length}</p>
+                       </div>
+                       <div className="flex-1 bg-white/10 rounded-xl p-3 text-center border border-white/5">
+                          <p className="text-[10px] text-gray-400 uppercase font-bold">Absent</p>
+                          <p className="text-xl font-bold">{historyAttendance.filter(a => a.status === 'absent').length}</p>
+                       </div>
+                    </div>
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-4 space-y-2">
                    {students.length > 0 ? (
                      students.map((student) => {
-                       const isPresent = historyAttendance.some(a => a.studentId === student.registerNo);
+                       const record = historyAttendance.find(a => a.studentId === student.registerNo);
+                       const isPresent = record?.status === 'present';
+                       const isAbsent = record?.status === 'absent';
+                       
                        return (
-                         <div key={student.id} className={`flex items-center p-3 rounded-xl border transition-all ${isPresent ? 'bg-green-50 border-green-100 shadow-sm' : 'bg-red-50 border-red-100'}`}>
+                         <div key={student.id} className={`flex items-center p-3 rounded-xl border transition-all ${isPresent ? 'bg-green-50 border-green-100 shadow-sm' : isAbsent ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100 opacity-60'}`}>
                             <div className="flex-1 grid grid-cols-3 items-center gap-4">
                                 <div className="flex flex-col">
                                   <span className="font-bold text-[10px] text-gray-400 uppercase tracking-tighter">{student.registerNo}</span>
                                   <span className="text-sm font-medium text-gray-900 truncate">{student.name}</span>
                                 </div>
                                 <div className="flex justify-end gap-2 items-center">
-                                  <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-tighter ${isPresent ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
-                                     {isPresent ? 'Present' : 'Absent'}
+                                  <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-tighter ${isPresent ? 'bg-green-600 text-white' : isAbsent ? 'bg-red-600 text-white' : 'bg-gray-400 text-white'}`}>
+                                     {isPresent ? 'Present' : isAbsent ? 'Absent' : 'No Data'}
                                   </span>
                                   <button
                                     onClick={() => isPresent ? unmarkStudent(student) : markStudentPresent(student)}
