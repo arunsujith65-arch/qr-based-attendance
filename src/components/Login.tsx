@@ -297,7 +297,7 @@ export default function Login() {
 
         <div className="pt-8 border-t border-gray-100">
           <p className="text-sm text-gray-400">
-            Powered by QR-Based Attendance Smart Systems
+            Powered By QR-Based Attendance System
           </p>
         </div>
       </div>
